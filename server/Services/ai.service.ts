@@ -1,0 +1,159 @@
+import dotenv from "dotenv";
+import { GoogleGenAI } from "@google/genai";
+
+dotenv.config();
+
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+});
+
+interface AIAssessment {
+  priorityScore: number;
+  aiActionType:
+      | "draft_email"
+      | "summarize_doc"
+      | "breakdown_tasks"
+      | "create_explanation"
+      | "research"
+      | "default";
+  suggestedStartDateTime: string | null;
+  suggestedEndDateTime: string | null;
+  isBlockingEvent: boolean;
+}
+
+export const analyzeTaskWithAI = async (
+    taskTitle: string,
+    description: string = "",
+): Promise<AIAssessment> => {
+  try {
+    const now = new Date();
+    const currentContext = now.toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    const prompt = `You are a precise backend JSON micro-service. Your job is to extract task details and return ONLY raw JSON.
+
+    Current System Date & Time (IST): ${currentContext}
+    
+    ### CLASSIFICATION RULES:
+    1. 'aiActionType': Must be one of ["draft_email", "summarize_doc", "breakdown_tasks", "research", "create_explanation", "default"]. 
+       - Use 'research' for finding information, suggesting places, or planning trips/itineraries.
+       - Use 'breakdown_tasks' for large projects needing sub-steps (like coding a feature).
+       - Use 'default' ONLY for simple chores, meetings, or if absolutely nothing else fits.
+    2. 'suggestedStartDateTime' & 'suggestedEndDateTime': Format as "YYYY-MM-DDTHH:mm". If relative ("tomorrow at 5 pm"), calculate from Current System Date. If duration is missing, assume 1 hour. If NO specific time is mentioned, return null.
+    3. 'isBlockingEvent': true ONLY if it's a meeting, interview, date, or appointment requiring presence at a specific time. false for flexible chores, planning, or research.
+    4. 'priorityScore': Rate strictly from 1 to 10 based on urgency.
+
+    ### EXAMPLES (LEARN FROM THESE):
+    
+    Input: Title: "Spiti Trip", Description: "Plan my complete spiti circuit trip for 5 days"
+    Output: {"priorityScore": 6, "aiActionType": "research", "suggestedStartDateTime": null, "suggestedEndDateTime": null, "isBlockingEvent": false}
+    
+    Input: Title: "Interview", Description: "Schedule interview tomorrow at 4 pm"
+    Output: {"priorityScore": 9, "aiActionType": "default", "suggestedStartDateTime": "2026-06-29T16:00", "suggestedEndDateTime": "2026-06-29T17:00", "isBlockingEvent": true}
+    
+    Input: Title: "OOPs explanation", Description: "Explain me the concepts of OOPs immedietly"
+    Output: {"priorityScore": 7, "aiActionType": "create_explanation", "suggestedStartDateTime": null, "suggestedEndDateTime": null, "isBlockingEvent": false}
+
+    ### NOW PROCESS THIS REAL INPUT:
+    Input: Title: "${taskTitle}", Description: "${description}"
+    Output:
+    `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        systemInstruction: "You are a precise backend micro-service. Always return raw JSON without markdown.",
+        responseMimeType: "application/json",
+      },
+    });
+
+    const rawText = response.text || "{}";
+    const data: AIAssessment = JSON.parse(rawText);
+    return data;
+  } catch (error) {
+    console.error("Error in Gemini API Service:", error);
+    return { priorityScore: 5, aiActionType: "default", suggestedStartDateTime: null, suggestedEndDateTime: null, isBlockingEvent: false };
+  }
+};
+
+export const suggestAlternativeTime = async (blockedUntil: string): Promise<string> => {
+  try {
+    const prompt = `
+        The user has a schedule conflict and is busy until EXACTLY "${blockedUntil}".
+        Suggest the next best available 1-hour slot starting right after this time or later.
+        Return ONLY the updated start date-time string strictly in "YYYY-MM-DDTHH:mm" format. No text.
+        `;
+    const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+    return response.text?.trim() || blockedUntil;
+  } catch (error) {
+    return blockedUntil;
+  }
+};
+
+export const executeActionWithAI = async (
+    actionType: string,
+    title: string,
+    description: string,
+): Promise<string> => {
+  try {
+    let prompt = "";
+    switch (actionType) {
+      case "draft_email": prompt = `Write a professional email based on this request. \nSubject: ${title}\nContext: ${description}`; break;
+      case "summarize_doc": prompt = `Provide a clear, bulleted summary with action items. \nTitle: ${title}\nContext: ${description}`; break;
+      case "breakdown_tasks": prompt = `Break down this project into a step-by-step checklist. \nGoal: ${title}\nContext: ${description}`; break;
+      case "create_explanation": prompt = `Explain the following topic clearly. \nTopic: ${title}\nContext: ${description}`; break;
+      case "research": prompt = `Provide a quick research summary. \nTopic: ${title}\nContext: ${description}`; break;
+      case "default": default: return "No automated action required for this task type.";
+    }
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        systemInstruction: "You are a helpful AI assistant. Provide clear, direct markdown text without conversational filler.",
+      },
+    });
+    return response.text || "Failed to generate content.";
+  } catch (error) {
+    return "Error occurred while generating AI response.";
+  }
+};
+
+export const getProductivityInsights = async (tasks: any[]): Promise<string> => {
+  try {
+    const taskSummary = tasks.map(t => ({
+      title: t.title,
+      status: t.status,
+      isBlocking: t.isBlockingEvent,
+      priority: t.priorityScore
+    }));
+
+    const prompt = `
+        Analyze these recent tasks and act as a professional Productivity Coach.
+        Tasks: ${JSON.stringify(taskSummary)}
+
+        Rules:
+        1. Identify patterns (e.g., are they skipping blocking tasks? Is productivity high in the morning?).
+        2. Give 3 actionable tips for the next 24 hours.
+        3. Keep it encouraging but direct.
+        4. Provide the response in clear, concise markdown text.
+        `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+    });
+
+    return response.text || "Keep up the good work!";
+  } catch (error) {
+    return "Stay focused and crush your goals today!";
+  }
+};
