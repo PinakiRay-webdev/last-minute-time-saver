@@ -6,17 +6,8 @@ export interface AuthRequest extends Request{
 }
 
 const protectedRoute = async (req:AuthRequest,res:Response, next:NextFunction):Promise<void> =>{
-    const authHeaders = req.header("authorization");
-    if(!authHeaders){
-        res.status(401).send({
-            status: "unauthorized",
-            message: "Not authorized"
-        });
-        return;
-    }
-
+    const token = req.cookies.token
     try{
-        const token = authHeaders.split(" ")[1]
         if(!token){
             res.status(401).send({
                 status: "unauthorized",

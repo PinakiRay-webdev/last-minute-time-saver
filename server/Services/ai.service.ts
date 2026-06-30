@@ -10,31 +10,31 @@ const ai = new GoogleGenAI({
 interface AIAssessment {
   priorityScore: number;
   aiActionType:
-      | "draft_email"
-      | "summarize_doc"
-      | "breakdown_tasks"
-      | "create_explanation"
-      | "research"
-      | "default";
+    | "draft_email"
+    | "summarize_doc"
+    | "breakdown_tasks"
+    | "create_explanation"
+    | "research"
+    | "default";
   suggestedStartDateTime: string | null;
   suggestedEndDateTime: string | null;
   isBlockingEvent: boolean;
 }
 
 export const analyzeTaskWithAI = async (
-    taskTitle: string,
-    description: string = "",
+  taskTitle: string,
+  description: string = "",
 ): Promise<AIAssessment> => {
   try {
     const now = new Date();
     const currentContext = now.toLocaleString("en-IN", {
       timeZone: "Asia/Kolkata",
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
 
     const prompt = `You are a precise backend JSON micro-service. Your job is to extract task details and return ONLY raw JSON.
@@ -70,7 +70,8 @@ export const analyzeTaskWithAI = async (
       model: "gemini-2.5-flash",
       contents: prompt,
       config: {
-        systemInstruction: "You are a precise backend micro-service. Always return raw JSON without markdown.",
+        systemInstruction:
+          "You are a precise backend micro-service. Always return raw JSON without markdown.",
         responseMimeType: "application/json",
       },
     });
@@ -80,18 +81,23 @@ export const analyzeTaskWithAI = async (
     return data;
   } catch (error) {
     console.error("Error in Gemini API Service:", error);
-    return { priorityScore: 5, aiActionType: "default", suggestedStartDateTime: null, suggestedEndDateTime: null, isBlockingEvent: false };
+    throw new Error("Failed to analyze task with AI due to an external service error.");
   }
 };
 
-export const suggestAlternativeTime = async (blockedUntil: string): Promise<string> => {
+export const suggestAlternativeTime = async (
+  blockedUntil: string,
+): Promise<string> => {
   try {
     const prompt = `
         The user has a schedule conflict and is busy until EXACTLY "${blockedUntil}".
         Suggest the next best available 1-hour slot starting right after this time or later.
         Return ONLY the updated start date-time string strictly in "YYYY-MM-DDTHH:mm" format. No text.
         `;
-    const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+    });
     return response.text?.trim() || blockedUntil;
   } catch (error) {
     return blockedUntil;
@@ -99,26 +105,39 @@ export const suggestAlternativeTime = async (blockedUntil: string): Promise<stri
 };
 
 export const executeActionWithAI = async (
-    actionType: string,
-    title: string,
-    description: string,
+  actionType: string,
+  title: string,
+  description: string,
 ): Promise<string> => {
   try {
     let prompt = "";
     switch (actionType) {
-      case "draft_email": prompt = `Write a professional email based on this request. \nSubject: ${title}\nContext: ${description}`; break;
-      case "summarize_doc": prompt = `Provide a clear, bulleted summary with action items. \nTitle: ${title}\nContext: ${description}`; break;
-      case "breakdown_tasks": prompt = `Break down this project into a step-by-step checklist. \nGoal: ${title}\nContext: ${description}`; break;
-      case "create_explanation": prompt = `Explain the following topic clearly. \nTopic: ${title}\nContext: ${description}`; break;
-      case "research": prompt = `Provide a quick research summary. \nTopic: ${title}\nContext: ${description}`; break;
-      case "default": default: return "No automated action required for this task type.";
+      case "draft_email":
+        prompt = `Write a professional email based on this request. \nSubject: ${title}\nContext: ${description}`;
+        break;
+      case "summarize_doc":
+        prompt = `Provide a clear, bulleted summary with action items. \nTitle: ${title}\nContext: ${description}`;
+        break;
+      case "breakdown_tasks":
+        prompt = `Break down this project into a step-by-step checklist. \nGoal: ${title}\nContext: ${description}`;
+        break;
+      case "create_explanation":
+        prompt = `Explain the following topic clearly. \nTopic: ${title}\nContext: ${description}`;
+        break;
+      case "research":
+        prompt = `Provide a quick research summary. \nTopic: ${title}\nContext: ${description}`;
+        break;
+      case "default":
+      default:
+        return "No automated action required for this task type.";
     }
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: {
-        systemInstruction: "You are a helpful AI assistant. Provide clear, direct markdown text without conversational filler.",
+        systemInstruction:
+          "You are a helpful AI assistant. Provide clear, direct markdown text without conversational filler.",
       },
     });
     return response.text || "Failed to generate content.";
@@ -127,24 +146,27 @@ export const executeActionWithAI = async (
   }
 };
 
-export const getProductivityInsights = async (tasks: any[]): Promise<string> => {
+export const getProductivityInsights = async (
+  tasks: any[],
+): Promise<string> => {
   try {
-    const taskSummary = tasks.map(t => ({
+    const taskSummary = tasks.map((t) => ({
       title: t.title,
       status: t.status,
       isBlocking: t.isBlockingEvent,
-      priority: t.priorityScore
+      priority: t.priorityScore,
     }));
 
     const prompt = `
-        Analyze these recent tasks and act as a professional Productivity Coach.
-        Tasks: ${JSON.stringify(taskSummary)}
+        Analyze this complete history of the user's tasks and act as a professional Productivity Coach.
+        Tasks Data: ${JSON.stringify(taskSummary)}
 
         Rules:
-        1. Identify patterns (e.g., are they skipping blocking tasks? Is productivity high in the morning?).
-        2. Give 3 actionable tips for the next 24 hours.
-        3. Keep it encouraging but direct.
-        4. Provide the response in clear, concise markdown text.
+        1. Identify long-term patterns (e.g., completion rate, preference for blocking vs non-blocking tasks, priority handling).
+        2. Give a deep dive into their productivity habits.
+        3. Provide 3 highly actionable, strategic tips to improve their workflow.
+        4. Keep it encouraging but direct.
+        5. Provide the response in clear, concise markdown text.
         `;
 
     const response = await ai.models.generateContent({
@@ -152,8 +174,52 @@ export const getProductivityInsights = async (tasks: any[]): Promise<string> => 
       contents: prompt,
     });
 
-    return response.text || "Keep up the good work!";
+    return (
+      response.text ||
+      "Keep up the good work! You are managing your tasks well."
+    );
+  } catch (error: any) {
+    return error.message || "Failed to generate insights.";
+  }
+};
+
+export const suggestTaskTitles = async (tasks: any[]): Promise<string[]> => {
+  try {
+    const taskTitles = tasks.map((t) => t.title);
+
+    const prompt = `
+        You are a smart task-prediction engine. The user recently added or worked on these 5 tasks:
+        Recent Tasks: ${JSON.stringify(taskTitles)}
+
+        Based on these recent activities, suggest 4 to 6 short, natural follow-up tasks or daily routine tasks the user might want to do next.
+        
+        Rules:
+        1. Return ONLY a raw JSON array of strings. No markdown, no conversational text.
+        2. Keep titles short and actionable (max 5-6 words).
+        3. Examples of output format: ["Follow up with client", "Review weekly code", "Plan weekend trip", "Buy groceries"]
+        `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        systemInstruction:
+          "You are a precise backend micro-service. Always return a raw JSON array of strings.",
+        responseMimeType: "application/json",
+      },
+    });
+
+    const rawText = response.text || "[]";
+    const suggestions: string[] = JSON.parse(rawText);
+
+    return suggestions.slice(0, 6);
   } catch (error) {
-    return "Stay focused and crush your goals today!";
+    console.error("Error in suggestTaskTitles:", error);
+    return [
+      "Review pending tasks",
+      "Check emails",
+      "Plan tomorrow's schedule",
+      "Drink water & stretch",
+    ];
   }
 };
